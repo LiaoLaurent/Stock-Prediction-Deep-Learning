@@ -1,8 +1,10 @@
 import numpy as np
 import pandas as pd
-import argparse
 import ta
 import matplotlib.pyplot as plt
+
+market_open_time = "09:30:00"
+market_close_time = "16:00:00"
 
 
 def load_data(data_path):
@@ -50,27 +52,7 @@ def preprocess_data(df):
 
     df_combined.dropna(inplace=True)
 
-    hours, minutes, seconds = (
-        df_combined.index.hour,
-        df_combined.index.minute,
-        df_combined.index.second,
-    )
-    time_features = pd.DataFrame(
-        {
-            "hour": hours,
-            "sin_hour": np.sin(2 * np.pi * hours / 24),
-            "cos_hour": np.cos(2 * np.pi * hours / 24),
-            "minute": minutes,
-            "sin_min": np.sin(2 * np.pi * minutes / 60),
-            "cos_min": np.cos(2 * np.pi * minutes / 60),
-            "second": seconds,
-            "sin_sec": np.sin(2 * np.pi * seconds / 60),
-            "cos_sec": np.cos(2 * np.pi * seconds / 60),
-        },
-        index=df_combined.index,
-    )
-
-    return pd.concat([df_combined, time_features], axis=1)
+    return df_combined
 
 
 def compute_hft_indicators(df):
@@ -147,4 +129,55 @@ def compute_hft_indicators(df):
 
     indicators.drop(columns=["High_Shift", "Low_Shift"], inplace=True)
 
-    return indicators.ffill().iloc[6:]
+    indicators.ffill(inplace=True)
+
+    last_nan_index = indicators[indicators.isna().any(axis=1)].index[-1]
+
+    # Drop all starting values with NaNs
+    indicators = indicators.iloc[indicators.index.get_loc(last_nan_index) + 1 :]
+
+    return indicators.between_time(market_open_time, market_close_time)
+
+
+def combine_data(data_paths):
+    trading_days_df = []
+
+    for file_path in data_paths:
+        df = load_data(file_path)
+        df = preprocess_data(df)
+        df_hft = compute_hft_indicators(df)
+
+        trading_days_df.append(df_hft)
+
+    return pd.concat(trading_days_df, axis=0)
+
+
+def add_time_features(combined_df):
+    combined_df = combined_df.copy()
+
+    # Compute market open time (09:30 AM) for each trading day
+    combined_df["market_open_time"] = combined_df.index.normalize() + pd.Timedelta(
+        hours=9, minutes=30
+    )
+
+    # Compute seconds since market open
+    combined_df["time_since_open"] = (
+        combined_df.index - combined_df["market_open_time"]
+    ).dt.total_seconds()
+
+    # Encode day of the week as one-hot vectors
+    combined_df["day_of_week"] = combined_df.index.weekday  # Extract day of the week
+    combined_df = pd.get_dummies(combined_df, columns=["day_of_week"], prefix="dow")
+
+    one_hot_columns = [col for col in combined_df.columns if col.startswith("dow_")]
+    combined_df[one_hot_columns] = combined_df[one_hot_columns].astype(int)
+
+    # Add market session feature (morning = 0, afternoon = 1)
+    combined_df["market_session"] = (
+        combined_df["time_since_open"] > 3.5 * 3600
+    ).astype(int)
+
+    # Drop unnecessary columns
+    combined_df.drop(columns=["market_open_time"], inplace=True)
+
+    return combined_df
