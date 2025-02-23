@@ -176,7 +176,7 @@ def plot_evaluation_metrics(y_true, y_pred, log_probabilities):
     axes[1].legend()
 
     # Scatter Plot of Predictions
-    sns.scatterplot(
+    scatter = sns.scatterplot(
         x=np.arange(len(probabilities)),
         y=probabilities.max(axis=1),
         hue=y_true,
@@ -187,7 +187,11 @@ def plot_evaluation_metrics(y_true, y_pred, log_probabilities):
     axes[2].set_title("Scatter Plot of Predictions")
     axes[2].set_xlabel("Sample Index")
     axes[2].set_ylabel("Max Predicted Probability")
-    axes[2].legend(["Class -1", "Class 0", "Class 1"])
+
+    handles, labels = scatter.get_legend_handles_labels()
+    new_labels = ["Class -1", "Class 0", "Class 1"]
+    axes[2].legend(handles, new_labels, title="True Class")
+
     axes[2].tick_params(axis="x", rotation=45)
 
     plt.tight_layout()
