@@ -14,51 +14,43 @@ def plot_close_price_split(df, train_size, val_size):
     market_open_time = pd.to_datetime("09:30:00").time()
     market_close_time = pd.to_datetime("16:00:00").time()
 
-    # Create a new transformed index for a continuous time axis
-    df = df.copy()
-    df["market_time"] = np.nan  # Placeholder for transformed time index
-    continuous_time = 0  # Track cumulative trading time without gaps
-
-    for date, group in df.groupby(df.index.date):  # Loop through each trading day
+    # Plot the close price with original timestamps in segments to avoid discontinuity
+    for date, group in df.groupby(df.index.date):
         market_open = group.between_time(market_open_time, market_close_time)
-
-        if not market_open.empty:  # Ensure there's data for this day
-            time_since_open = (market_open.index - market_open.index[0]).total_seconds()
-            df.loc[market_open.index, "market_time"] = continuous_time + time_since_open
-            continuous_time += time_since_open[-1]  # Update cumulative market time
-
-    # Drop NaNs (removes non-market hours)
-    df = df.dropna(subset=["market_time"])
-
-    # Plot the close price with transformed time axis
-    plt.plot(
-        df["market_time"],
-        df["mid_price_close"],
-        color="blue",
-        linewidth=1.5,
-        label="Stock Close Price",
-    )
-
-    # Get transformed time indices for splits
-    train_end = df["market_time"].iloc[train_size - 1]
-    val_end = df["market_time"].iloc[train_size + val_size - 1]
+        plt.plot(
+            market_open.index,
+            market_open["mid_price_close"],
+            label="Full Series" if date == df.index.date[0] else "",
+            color="blue",
+            linewidth=1.5,
+        )
 
     # Highlight Training, Validation, and Testing Regions
     plt.axvspan(
-        df["market_time"].iloc[0],
-        train_end,
+        df.index[0],
+        df.index[train_size - 1],
         color="blue",
         alpha=0.2,
         label="Training Data",
     )
-    plt.axvspan(train_end, val_end, color="orange", alpha=0.2, label="Validation Data")
     plt.axvspan(
-        val_end, df["market_time"].iloc[-1], color="red", alpha=0.2, label="Test Data"
+        df.index[train_size],
+        df.index[train_size + val_size - 1],
+        color="orange",
+        alpha=0.2,
+        label="Validation Data",
+    )
+    plt.axvspan(
+        df.index[train_size + val_size],
+        df.index[-1],
+        color="red",
+        alpha=0.2,
+        label="Test Data",
     )
 
-    plt.xlabel("Trading Time (Discontinuous)")
+    plt.xlabel("Time")
     plt.ylabel("Close Price")
-    plt.title("Close Price Distribution")
+    plt.title("Close Price Distribution Across Training, Validation & Testing")
     plt.legend()
     plt.grid(True, linestyle="--", linewidth=0.5)
     plt.show()
@@ -74,10 +66,15 @@ def plot_samples(datasets, titles, feature_names):
     for i, (dataset, title) in enumerate(zip(datasets, titles)):
         sample_idx = np.random.randint(len(dataset))
         sample, target = dataset[sample_idx]
-        sample = sample.numpy().T  # Transpose for feature-wise plotting
 
-        for j, feature in enumerate(feature_names):
-            axes[i].plot(sample[j], marker="o", linestyle="-", alpha=0.7, label=feature)
+        # Convert sample to NumPy and transpose
+        sample = sample.numpy().T  # (features, timesteps)
+
+        # Plot each feature separately
+        for j in range(len(feature_names)):
+            axes[i].plot(
+                sample[j], marker="o", linestyle="-", alpha=0.7, label=feature_names[j]
+            )
 
         # Get target class as integer
         target_value = int(target.item())

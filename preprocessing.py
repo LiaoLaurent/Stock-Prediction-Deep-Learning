@@ -13,32 +13,45 @@ def load_data(data_path):
     return df
 
 
-def preprocess_data(df):
+def calculate_mid_price(df):
     df["mid_price"] = df[["ask_px_00", "bid_px_00"]].mean(axis=1)
     df["mid_price"] = df["mid_price"].combine_first(df["ask_px_00"])
     df["mid_price"] = df["mid_price"].combine_first(df["bid_px_00"])
+    return df
 
+
+def resample_mid_prices(df, sampling_rate):
     mid_prices = pd.DataFrame(
         {
-            "mid_price_high": df["mid_price"].resample("s").max().ffill(),
-            "mid_price_low": df["mid_price"].resample("s").min().ffill(),
-            "mid_price_close": df["mid_price"].resample("s").last().ffill(),
-            "mid_price_open": df["mid_price"].resample("s").first().ffill(),
+            "mid_price_high": df["mid_price"].resample(sampling_rate).max().ffill(),
+            "mid_price_low": df["mid_price"].resample(sampling_rate).min().ffill(),
+            "mid_price_close": df["mid_price"].resample(sampling_rate).last().ffill(),
+            "mid_price_open": df["mid_price"].resample(sampling_rate).first().ffill(),
         }
     )
-
     mid_prices["Returns"] = mid_prices["mid_price_close"].pct_change()
     mid_prices["Target"] = np.sign(mid_prices["Returns"])
+    return mid_prices
 
+
+def calculate_order_sizes(df, sampling_rate):
     grouped = (
-        df.groupby([pd.Grouper(freq="s"), "action", "side"])["size"].sum().reset_index()
+        df.groupby([pd.Grouper(freq=sampling_rate), "action", "side"])["size"]
+        .sum()
+        .reset_index()
     )
     order_sizes = grouped.pivot_table(
         index="ts_event", columns=["action", "side"], values="size", fill_value=0
     )
-    order_sizes.drop(
-        columns=[("A", "N"), ("C", "N"), ("T", "N")], inplace=True, errors="ignore"
-    )
+    columns_to_keep = [
+        ("A", "A"),
+        ("A", "B"),
+        ("C", "A"),
+        ("C", "B"),
+        ("T", "A"),
+        ("T", "B"),
+    ]
+    order_sizes = order_sizes[columns_to_keep]
 
     action_mapping = {"A": "add", "C": "cancel", "T": "trade"}
     side_mapping = {"A": "ask", "B": "bid"}
@@ -46,10 +59,23 @@ def preprocess_data(df):
         f"{action_mapping[action]}_{side_mapping[side]}_size"
         for action, side in order_sizes.columns
     ]
+    order_sizes["net_ask_size"] = (
+        order_sizes["add_ask_size"] - order_sizes["cancel_ask_size"]
+    )
+    order_sizes["net_bid_size"] = (
+        order_sizes["add_bid_size"] - order_sizes["cancel_bid_size"]
+    )
+
+    return order_sizes
+
+
+def preprocess_data(df, sampling_rate="1s"):
+    df = calculate_mid_price(df)
+    mid_prices = resample_mid_prices(df, sampling_rate)
+    order_sizes = calculate_order_sizes(df, sampling_rate)
     order_sizes = order_sizes.reindex(mid_prices.index, fill_value=0)
 
     df_combined = pd.concat([mid_prices, order_sizes], axis=1)
-
     df_combined.dropna(inplace=True)
 
     return df_combined
@@ -139,12 +165,12 @@ def compute_hft_indicators(df):
     return indicators.between_time(market_open_time, market_close_time)
 
 
-def combine_data(data_paths):
+def combine_data(data_paths, sampling_rate="1s"):
     trading_days_df = []
 
     for file_path in data_paths:
         df = load_data(file_path)
-        df = preprocess_data(df)
+        df = preprocess_data(df, sampling_rate)
         df_hft = compute_hft_indicators(df)
 
         trading_days_df.append(df_hft)
