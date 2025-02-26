@@ -1,6 +1,6 @@
 /AAPL_data
 /AMZN
 /tensorflow_files
-/__pycache__
+**/__pycache__
 test.ipynb
 returns_predictions.py

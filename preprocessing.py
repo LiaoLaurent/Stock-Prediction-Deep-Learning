@@ -59,10 +59,10 @@ def calculate_order_sizes(df, sampling_rate):
         f"{action_mapping[action]}_{side_mapping[side]}_size"
         for action, side in order_sizes.columns
     ]
-    order_sizes["net_ask_size"] = (
+    order_sizes["net_add_ask_size"] = (
         order_sizes["add_ask_size"] - order_sizes["cancel_ask_size"]
     )
-    order_sizes["net_bid_size"] = (
+    order_sizes["net_add_bid_size"] = (
         order_sizes["add_bid_size"] - order_sizes["cancel_bid_size"]
     )
 
@@ -81,26 +81,33 @@ def preprocess_data(df, sampling_rate="1s"):
     return df_combined
 
 
-def compute_hft_indicators(df):
-    indicators = df.copy()
+# Computing Technical Indicators
 
+
+def calculate_moving_averages(indicators):
     indicators["EMA_5"] = ta.trend.ema_indicator(
         indicators["mid_price_close"], window=5
     )
     indicators["MA_5"] = (
         indicators["mid_price_close"].rolling(window=5, min_periods=1).mean()
     )
+    return indicators
 
-    indicators["Bollinger_Upper"] = indicators["MA_5"] + (
-        indicators["mid_price_close"].rolling(5).std() * 2
-    )
-    indicators["Bollinger_Lower"] = indicators["MA_5"] - (
-        indicators["mid_price_close"].rolling(5).std() * 2
-    )
 
+def calculate_bollinger_bands(indicators):
+    rolling_std = indicators["mid_price_close"].rolling(window=5, min_periods=1).std()
+    indicators["Bollinger_Upper"] = indicators["MA_5"] + (rolling_std * 2)
+    indicators["Bollinger_Lower"] = indicators["MA_5"] - (rolling_std * 2)
+    return indicators
+
+
+def calculate_shifted_high_low(indicators):
     indicators["High_Shift"] = indicators["mid_price_high"].shift(1)
     indicators["Low_Shift"] = indicators["mid_price_low"].shift(1)
+    return indicators
 
+
+def calculate_dmp_dmn(indicators):
     indicators["DMP_3"] = (
         pd.Series(
             np.where(
@@ -111,7 +118,7 @@ def compute_hft_indicators(df):
                 np.maximum(indicators["mid_price_high"] - indicators["High_Shift"], 0),
                 0,
             ),
-            index=df.index,
+            index=indicators.index,
         )
         .rolling(3, min_periods=1)
         .sum()
@@ -127,12 +134,15 @@ def compute_hft_indicators(df):
                 np.maximum(indicators["Low_Shift"] - indicators["mid_price_low"], 0),
                 0,
             ),
-            index=df.index,
+            index=indicators.index,
         )
         .rolling(3, min_periods=1)
         .sum()
     )
+    return indicators
 
+
+def calculate_oll(indicators):
     indicators["OLL3"] = (
         indicators["mid_price_open"]
         - indicators["mid_price_low"].rolling(3, min_periods=1).min()
@@ -141,7 +151,10 @@ def compute_hft_indicators(df):
         indicators["mid_price_open"]
         - indicators["mid_price_low"].rolling(5, min_periods=1).min()
     )
+    return indicators
 
+
+def calculate_stochastic_oscillator(indicators):
     indicators["STOCHk_7_3_3"] = ta.momentum.stoch(
         indicators["mid_price_high"],
         indicators["mid_price_low"],
@@ -152,17 +165,29 @@ def compute_hft_indicators(df):
     indicators["STOCHd_7_3_3"] = (
         indicators["STOCHk_7_3_3"].rolling(3, min_periods=1).mean()
     )
+    return indicators
+
+
+def compute_hft_indicators(df):
+    indicators = df.copy()
+
+    indicators = calculate_moving_averages(indicators)
+    indicators = calculate_bollinger_bands(indicators)
+    indicators = calculate_shifted_high_low(indicators)
+    indicators = calculate_dmp_dmn(indicators)
+    indicators = calculate_oll(indicators)
+    indicators = calculate_stochastic_oscillator(indicators)
 
     indicators.drop(columns=["High_Shift", "Low_Shift"], inplace=True)
-
     indicators.ffill(inplace=True)
 
     last_nan_index = indicators[indicators.isna().any(axis=1)].index[-1]
-
-    # Drop all starting values with NaNs
     indicators = indicators.iloc[indicators.index.get_loc(last_nan_index) + 1 :]
 
     return indicators.between_time(market_open_time, market_close_time)
+
+
+# Combine Data from Multiple Trading Days
 
 
 def combine_data(data_paths, sampling_rate="1s"):
@@ -181,7 +206,6 @@ def combine_data(data_paths, sampling_rate="1s"):
 def add_time_features(combined_df):
     combined_df = combined_df.copy()
 
-    # Compute market open time (09:30 AM) for each trading day
     combined_df["market_open_time"] = combined_df.index.normalize() + pd.Timedelta(
         hours=9, minutes=30
     )
