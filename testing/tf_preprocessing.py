@@ -12,7 +12,7 @@ def load_data(data_path):
     return df.between_time(market_open, market_close)
 
 
-def resample_mid_prices(df, sampling_rate):
+def resample_mid_prices(raw_data, sampling_rate, returns_discretization="10ms"):
     """
     Resample the mid_price values by the given sampling rate to get highest, lowest, open, close, and mean prices.
 
@@ -23,36 +23,50 @@ def resample_mid_prices(df, sampling_rate):
     Returns:
     pd.DataFrame: DataFrame containing the resampled mid_price values.
     """
-    df_copy = df.copy()
-    # Add mid price column (either the bid or the ask if one is missing)
-    df_copy["mid_price"] = df_copy[["ask_px_00", "bid_px_00"]].mean(axis=1)
-    df_copy["mid_price"] = df_copy["mid_price"].combine_first(df_copy["ask_px_00"])
-    df_copy["mid_price"] = df_copy["mid_price"].combine_first(df_copy["bid_px_00"])
+    df = raw_data.copy()
+    df["mid_price"] = df[["ask_px_00", "bid_px_00"]].mean(axis=1)
+    df["mid_price"] = df["mid_price"].combine_first(df["ask_px_00"])
+    df["mid_price"] = df["mid_price"].combine_first(df["bid_px_00"])
 
-    mid_prices_high = df_copy["mid_price"].resample(sampling_rate).max().ffill()
-    mid_prices_low = df_copy["mid_price"].resample(sampling_rate).min().ffill()
-    mid_prices_close = df_copy["mid_price"].resample(sampling_rate).last().ffill()
-    mid_prices_open = df_copy["mid_price"].resample(sampling_rate).first().ffill()
+    # Computing volatilities over sampling_eate length periods
+    mid_prices_discretized = df["mid_price"].resample(returns_discretization).last()
+    returns_discretized = mid_prices_discretized.pct_change(fill_method=None)
+    volatilities = returns_discretized.resample(sampling_rate).std()
 
-    returns_volatilities = (
-        df_copy["mid_price"].pct_change().resample(sampling_rate).std().ffill()
-    )
+    # Computing the returns over sampling_rate length periods
+    mid_prices_last = df["mid_price"].resample(sampling_rate).last()
+    returns_aggregated = mid_prices_last.pct_change(fill_method=None)
 
-    returns = mid_prices_close.pct_change()
+    # Computing the open, high, first (open), and close prices over sampling_rate length periods
+    mid_prices_first = df["mid_price"].resample(sampling_rate).first()
+    mid_prices_high = df["mid_price"].resample(sampling_rate).max()
+    mid_prices_low = df["mid_price"].resample(sampling_rate).min()
 
-    # Combine the resampled mid_price values into a single DataFrame
+    # Aggregating into mid_price data
     mid_prices = pd.DataFrame(
         {
+            "mid_price_first": mid_prices_first,
             "mid_price_high": mid_prices_high,
             "mid_price_low": mid_prices_low,
-            "mid_price_close": mid_prices_close,
-            "mid_price_open": mid_prices_open,
-            "returns": returns,
-            "returns_volatility": returns_volatilities,
+            "mid_price_last": mid_prices_last,
         }
     )
 
-    return mid_prices
+    # Compute the close price
+
+    df_trades = df[df["action"] == "T"]
+    close_prices = df_trades["price"].resample(sampling_rate).last()
+    close_prices.ffill(inplace=True)
+
+    return pd.concat(
+        [
+            mid_prices,
+            close_prices.rename("close_prices"),
+            returns_aggregated.rename("returns"),
+            volatilities.rename("volatilities"),
+        ],
+        axis=1,
+    ).dropna()
 
 
 def group_and_pivot_order_sizes(df, sampling_rate):
