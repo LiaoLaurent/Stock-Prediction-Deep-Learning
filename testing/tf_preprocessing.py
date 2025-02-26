@@ -21,7 +21,7 @@ def resample_mid_prices(df, sampling_rate):
     sampling_rate (str): The sampling rate for resampling the data.
 
     Returns:
-    pd.DataFrame: DataFrame containing the resampled mid_price values and max depth.
+    pd.DataFrame: DataFrame containing the resampled mid_price values.
     """
     df_copy = df.copy()
     # Add mid price column (either the bid or the ask if one is missing)
@@ -34,7 +34,11 @@ def resample_mid_prices(df, sampling_rate):
     mid_prices_close = df_copy["mid_price"].resample(sampling_rate).last().ffill()
     mid_prices_open = df_copy["mid_price"].resample(sampling_rate).first().ffill()
 
-    max_depths = df_copy["depth"].resample(sampling_rate).max().ffill()
+    returns_volatilities = (
+        df_copy["mid_price"].pct_change().resample(sampling_rate).std().ffill()
+    )
+
+    returns = mid_prices_close.pct_change()
 
     # Combine the resampled mid_price values into a single DataFrame
     mid_prices = pd.DataFrame(
@@ -43,7 +47,8 @@ def resample_mid_prices(df, sampling_rate):
             "mid_price_low": mid_prices_low,
             "mid_price_close": mid_prices_close,
             "mid_price_open": mid_prices_open,
-            "max_depth": max_depths,
+            "returns": returns,
+            "returns_volatility": returns_volatilities,
         }
     )
 
