@@ -13,57 +13,50 @@ def load_data(data_path):
 
 
 def resample_mid_prices(raw_data, sampling_rate, returns_discretization="10ms"):
-    """
-    Resample the mid_price values by the given sampling rate to get highest, lowest, open, close, and mean prices.
-
-    Parameters:
-    df (pd.DataFrame): DataFrame containing the mid_price and depth columns.
-    sampling_rate (str): The sampling rate for resampling the data.
-
-    Returns:
-    pd.DataFrame: DataFrame containing the resampled mid_price values.
-    """
     df = raw_data.copy()
     df["mid_price"] = df[["ask_px_00", "bid_px_00"]].mean(axis=1)
     df["mid_price"] = df["mid_price"].combine_first(df["ask_px_00"])
     df["mid_price"] = df["mid_price"].combine_first(df["bid_px_00"])
 
-    # Computing volatilities over sampling_eate length periods
+    # Compute volatility
     mid_prices_discretized = df["mid_price"].resample(returns_discretization).last()
-    returns_discretized = mid_prices_discretized.pct_change(fill_method=None)
-    volatilities = returns_discretized.resample(sampling_rate).std()
+    mid_prices_evolution_discretized = mid_prices_discretized.pct_change(
+        fill_method=None
+    )
+    mid_price_volatilitiy = mid_prices_evolution_discretized.resample(
+        sampling_rate
+    ).std()
 
-    # Computing the returns over sampling_rate length periods
+    # Compute returns
     mid_prices_last = df["mid_price"].resample(sampling_rate).last()
-    returns_aggregated = mid_prices_last.pct_change(fill_method=None)
+    mid_price_variation = mid_prices_last.pct_change(fill_method=None)
 
-    # Computing the open, high, first (open), and close prices over sampling_rate length periods
-    mid_prices_first = df["mid_price"].resample(sampling_rate).first()
-    mid_prices_high = df["mid_price"].resample(sampling_rate).max()
-    mid_prices_low = df["mid_price"].resample(sampling_rate).min()
-
-    # Aggregating into mid_price data
+    # Compute OHLC prices
     mid_prices = pd.DataFrame(
         {
-            "mid_price_first": mid_prices_first,
-            "mid_price_high": mid_prices_high,
-            "mid_price_low": mid_prices_low,
+            "mid_price_first": df["mid_price"].resample(sampling_rate).first(),
+            "mid_price_high": df["mid_price"].resample(sampling_rate).max(),
+            "mid_price_low": df["mid_price"].resample(sampling_rate).min(),
             "mid_price_last": mid_prices_last,
         }
     )
 
-    # Compute the close price
-
+    # Compute trade-based close, high, and low prices
     df_trades = df[df["action"] == "T"]
-    close_prices = df_trades["price"].resample(sampling_rate).last()
-    close_prices.ffill(inplace=True)
+    close = df_trades["price"].resample(sampling_rate).last().ffill()
+    high = df_trades["price"].resample(sampling_rate).max().ffill()
+    low = df_trades["price"].resample(sampling_rate).min().ffill()
+    open = df_trades["price"].resample(sampling_rate).first().ffill()
 
     return pd.concat(
         [
             mid_prices,
-            close_prices.rename("close_prices"),
-            returns_aggregated.rename("returns"),
-            volatilities.rename("volatilities"),
+            close.rename("close"),
+            high.rename("high"),
+            low.rename("low"),
+            open.rename("open"),
+            mid_price_variation.rename("mid_price_variation"),
+            mid_price_volatilitiy.rename("mid_price_volatility"),
         ],
         axis=1,
     ).dropna()
@@ -135,30 +128,30 @@ def compute_technical_indicators(df):
     # Make a copy of the DataFrame to avoid modifying the original
     df = df.copy()
 
-    df["Returns"] = df["mid_price_close"].pct_change()
+    df["Returns"] = df["mid_price_last"].pct_change()
     df["Target_close"] = np.sign(df["Returns"]) + 1
 
     ### TREND INDICATORS ###
     df["ADX_5"] = ta.trend.ADXIndicator(
-        df["mid_price_high"], df["mid_price_low"], df["mid_price_close"], window=5
+        df["mid_price_high"], df["mid_price_low"], df["mid_price_last"], window=5
     ).adx()
     df["ADX_7"] = ta.trend.ADXIndicator(
-        df["mid_price_high"], df["mid_price_low"], df["mid_price_close"], window=7
+        df["mid_price_high"], df["mid_price_low"], df["mid_price_last"], window=7
     ).adx()
     df["ADX_10"] = ta.trend.ADXIndicator(
-        df["mid_price_high"], df["mid_price_low"], df["mid_price_close"], window=10
+        df["mid_price_high"], df["mid_price_low"], df["mid_price_last"], window=10
     ).adx()
     df["DMP_5"] = ta.trend.ADXIndicator(
-        df["mid_price_high"], df["mid_price_low"], df["mid_price_close"], window=5
+        df["mid_price_high"], df["mid_price_low"], df["mid_price_last"], window=5
     ).adx_pos()
     df["DMP_10"] = ta.trend.ADXIndicator(
-        df["mid_price_high"], df["mid_price_low"], df["mid_price_close"], window=10
+        df["mid_price_high"], df["mid_price_low"], df["mid_price_last"], window=10
     ).adx_pos()
     df["DMN_5"] = ta.trend.ADXIndicator(
-        df["mid_price_high"], df["mid_price_low"], df["mid_price_close"], window=5
+        df["mid_price_high"], df["mid_price_low"], df["mid_price_last"], window=5
     ).adx_neg()
     df["DMN_10"] = ta.trend.ADXIndicator(
-        df["mid_price_high"], df["mid_price_low"], df["mid_price_close"], window=10
+        df["mid_price_high"], df["mid_price_low"], df["mid_price_last"], window=10
     ).adx_neg()
 
     # Aroon Indicator requires both high and low prices
@@ -170,25 +163,25 @@ def compute_technical_indicators(df):
     ).aroon_down()
 
     # Open-Low and Open-High calculations
-    df["OLL3"] = df["mid_price_open"] - df["mid_price_low"].rolling(window=3).min()
-    df["OLL5"] = df["mid_price_open"] - df["mid_price_low"].rolling(window=5).min()
-    df["OLL10"] = df["mid_price_open"] - df["mid_price_low"].rolling(window=10).min()
-    df["OLL15"] = df["mid_price_open"] - df["mid_price_low"].rolling(window=15).min()
-    df["OHH3"] = df["mid_price_high"].rolling(window=3).max() - df["mid_price_open"]
-    df["OHH5"] = df["mid_price_high"].rolling(window=5).max() - df["mid_price_open"]
+    df["OLL3"] = df["mid_price_first"] - df["mid_price_low"].rolling(window=3).min()
+    df["OLL5"] = df["mid_price_first"] - df["mid_price_low"].rolling(window=5).min()
+    df["OLL10"] = df["mid_price_first"] - df["mid_price_low"].rolling(window=10).min()
+    df["OLL15"] = df["mid_price_first"] - df["mid_price_low"].rolling(window=15).min()
+    df["OHH3"] = df["mid_price_high"].rolling(window=3).max() - df["mid_price_first"]
+    df["OHH5"] = df["mid_price_high"].rolling(window=5).max() - df["mid_price_first"]
 
     ### OSCILLATORS ###
     df["STOCHk_7_3_3"] = ta.momentum.StochasticOscillator(
         df["mid_price_high"],
         df["mid_price_low"],
-        df["mid_price_close"],
+        df["mid_price_last"],
         window=7,
         smooth_window=3,
     ).stoch()
     df["STOCHd_7_3_3"] = ta.momentum.StochasticOscillator(
         df["mid_price_high"],
         df["mid_price_low"],
-        df["mid_price_close"],
+        df["mid_price_last"],
         window=7,
         smooth_window=3,
     ).stoch_signal()
@@ -198,53 +191,49 @@ def compute_technical_indicators(df):
     df["STOCHd_7_3_3"] = df["STOCHd_7_3_3"].ffill()
 
     df["MACD_8_21_5"] = ta.trend.MACD(
-        df["mid_price_close"], window_slow=21, window_fast=8, window_sign=5
+        df["mid_price_last"], window_slow=21, window_fast=8, window_sign=5
     ).macd_diff()
-    df["RSI_7"] = ta.momentum.RSIIndicator(df["mid_price_close"], window=7).rsi()
+    df["RSI_7"] = ta.momentum.RSIIndicator(df["mid_price_last"], window=7).rsi()
     df["AO_5_10"] = ta.momentum.AwesomeOscillatorIndicator(
         df["mid_price_high"], df["mid_price_low"], window1=5, window2=10
     ).awesome_oscillator()
 
     ### MOVING AVERAGES ###
     df["EMA_15"] = ta.trend.EMAIndicator(
-        df["mid_price_close"], window=15
+        df["mid_price_last"], window=15
     ).ema_indicator()
     df["HMA_10"] = ta.trend.WMAIndicator(
-        df["mid_price_close"], window=10
+        df["mid_price_last"], window=10
     ).wma()  # HMA is not directly available in 'ta', using WMA as a placeholder
     df["KAMA_3_2_10"] = ta.momentum.KAMAIndicator(
-        df["mid_price_close"], window=3, pow1=2, pow2=10
+        df["mid_price_last"], window=3, pow1=2, pow2=10
     ).kama()
-    df["MA_10"] = ta.trend.SMAIndicator(
-        df["mid_price_close"], window=10
-    ).sma_indicator()
-    df["MA_20"] = ta.trend.SMAIndicator(
-        df["mid_price_close"], window=20
-    ).sma_indicator()
+    df["MA_10"] = ta.trend.SMAIndicator(df["mid_price_last"], window=10).sma_indicator()
+    df["MA_20"] = ta.trend.SMAIndicator(df["mid_price_last"], window=20).sma_indicator()
 
     # Rolling CO (Close - Open)
     for w in [3, 4, 5, 6]:
         df[f"rmCO({w})"] = (
-            (df["mid_price_close"] - df["mid_price_open"]).rolling(window=w).mean()
+            (df["mid_price_last"] - df["mid_price_first"]).rolling(window=w).mean()
         )
 
     ### VOLATILITY INDICATORS ###
     df["Bollinger_Upper"] = ta.volatility.BollingerBands(
-        df["mid_price_close"], window=20, window_dev=2
+        df["mid_price_last"], window=20, window_dev=2
     ).bollinger_hband()
     df["Bollinger_Lower"] = ta.volatility.BollingerBands(
-        df["mid_price_close"], window=20, window_dev=2
+        df["mid_price_last"], window=20, window_dev=2
     ).bollinger_lband()
     df["U_minus_L"] = df["Bollinger_Upper"] - df["Bollinger_Lower"]
-    df["MA20dSTD"] = df["mid_price_close"].rolling(window=20).std()
+    df["MA20dSTD"] = df["mid_price_last"].rolling(window=20).std()
 
     ### OTHER INDICATORS ###
-    df["CO"] = df["mid_price_close"] - df["mid_price_open"]
+    df["CO"] = df["mid_price_last"] - df["mid_price_first"]
     df["C1O1"] = df["CO"].shift(1)
     df["C2O2"] = df["CO"].shift(2)
     df["C3O3"] = df["CO"].shift(3)
     df["range"] = df["mid_price_high"] - df["mid_price_low"]
-    df["OH1"] = df["mid_price_high"].shift(1) - df["mid_price_open"].shift(1)
+    df["OH1"] = df["mid_price_high"].shift(1) - df["mid_price_first"].shift(1)
 
     return df.dropna()
 
