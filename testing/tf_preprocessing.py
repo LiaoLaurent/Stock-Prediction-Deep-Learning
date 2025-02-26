@@ -30,6 +30,7 @@ def resample_mid_prices(raw_data, sampling_rate, returns_discretization="10ms"):
     # Compute returns
     mid_prices_last = df["mid_price"].resample(sampling_rate).last()
     mid_price_variation = mid_prices_last.pct_change(fill_method=None)
+    mid_price_variation_class = np.sign(mid_price_variation) + 1
 
     # Compute OHLC prices
     mid_prices = pd.DataFrame(
@@ -56,6 +57,7 @@ def resample_mid_prices(raw_data, sampling_rate, returns_discretization="10ms"):
             low.rename("low"),
             open.rename("open"),
             mid_price_variation.rename("mid_price_variation"),
+            mid_price_variation_class.rename("mid_price_variation_class"),
             mid_price_volatilitiy.rename("mid_price_volatility"),
         ],
         axis=1,
@@ -248,8 +250,6 @@ def add_time_features(combined_df):
     Returns:
         combined_df (pd.DataFrame): The DataFrame with added time-based features.
     """
-    combined_df = combined_df.copy()
-
     # Add market open time for each day (9:30 AM)
     combined_df["market_open_time"] = combined_df.index.normalize() + pd.Timedelta(
         hours=9, minutes=30
