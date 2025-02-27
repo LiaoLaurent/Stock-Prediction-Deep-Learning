@@ -6,131 +6,155 @@ market_open = pd.Timestamp("09:30:00").time()
 market_close = pd.Timestamp("16:00:00").time()
 
 
-def load_data(data_path):
-    df = pd.read_parquet(data_path)
-    return df.between_time(market_open, market_close)
+def compute_order_book_features(raw_data, resample_rate):
 
-
-def resample_mid_prices(raw_data, sampling_rate, returns_discretization="10ms"):
     df = raw_data.copy()
+
+    # Compute the mid-price as the average of best bid/ask prices
     df["mid_price"] = df[["ask_px_00", "bid_px_00"]].mean(axis=1)
-    df["mid_price"] = df["mid_price"].combine_first(df["ask_px_00"])
-    df["mid_price"] = df["mid_price"].combine_first(df["bid_px_00"])
+    df["mid_price"] = df["mid_price"].fillna(df["ask_px_00"])
+    df["mid_price"] = df["mid_price"].fillna(df["bid_px_00"])
 
-    # Compute volatility
-    mid_prices_discretized = df["mid_price"].resample(returns_discretization).last()
-    mid_prices_evolution_discretized = mid_prices_discretized.pct_change(
-        fill_method=None
-    )
-    mid_price_volatilitiy = mid_prices_evolution_discretized.resample(
-        sampling_rate
-    ).std()
+    # Precompute masks for filtering specific actions
+    trade_mask = df["action"] == "T"
+    add_mask = df["action"] == "A"
+    cancel_mask = df["action"] == "C"
+    bid_mask = df["side"] == "B"
+    ask_mask = df["side"] == "A"
 
-    # Compute returns
-    mid_prices_last = df["mid_price"].resample(sampling_rate).last()
-    mid_price_variation = mid_prices_last.pct_change(fill_method=None)
-    mid_price_variation_class = np.sign(mid_price_variation) + 1
-
-    # Compute OHLC prices
-    mid_prices = pd.DataFrame(
+    # Aggregate resampled data using efficient functions
+    resampled_data = df.resample(resample_rate).agg(
         {
-            "mid_price_first": df["mid_price"].resample(sampling_rate).first(),
-            "mid_price_high": df["mid_price"].resample(sampling_rate).max(),
-            "mid_price_low": df["mid_price"].resample(sampling_rate).min(),
-            "mid_price_last": mid_prices_last,
+            "mid_price": ["first", "last", "max", "min", "mean", "std"],
+            "bid_px_00": ["last", "mean", "std"],
+            "ask_px_00": ["last", "mean", "std"],
+            "bid_sz_00": ["last", "mean", "std"],
+            "ask_sz_00": ["last", "mean", "std"],
+            "ask_px_01": "mean",
+            "bid_px_01": "mean",
         }
     )
 
-    # Compute trade-based close, high, and low prices
-    df_trades = df[df["action"] == "T"]
-    close = df_trades["price"].resample(sampling_rate).last().ffill()
-    high = df_trades["price"].resample(sampling_rate).max().ffill()
-    low = df_trades["price"].resample(sampling_rate).min().ffill()
-    open = df_trades["price"].resample(sampling_rate).first().ffill()
-
-    return pd.concat(
-        [
-            mid_prices,
-            close.rename("close"),
-            high.rename("high"),
-            low.rename("low"),
-            open.rename("open"),
-            mid_price_variation.rename("mid_price_variation"),
-            mid_price_variation_class.rename("mid_price_variation_class"),
-            mid_price_volatilitiy.rename("mid_price_volatility"),
-        ],
-        axis=1,
-    ).dropna()
-
-
-def group_and_pivot_order_sizes(df, sampling_rate):
-    """
-    Group by ts_event, action, and side, then sum the sizes and pivot the table to create new columns for each combination of action and side.
-
-    Parameters:
-    df (pd.DataFrame): DataFrame containing the ts_event, action, side, and size columns.
-    sampling_rate (str): The sampling rate for grouping the data.
-
-    Returns:
-    pd.DataFrame: DataFrame with pivoted columns for each combination of action and side.
-    """
-    # Group by ts_event, action, and side, then sum the sizes
-    grouped = (
-        df.groupby([pd.Grouper(freq=sampling_rate), "action", "side"])["size"]
-        .sum()
-        .reset_index()
-    )
-
-    # Pivot the table to create new columns for each combination of action and side
-    order_sizes = grouped.pivot_table(
-        index="ts_event", columns=["action", "side"], values="size", fill_value=0
-    )
-
-    # Drop unnecessary columns
-    columns_to_keep = [
-        ("A", "A"),
-        ("A", "B"),
-        ("C", "A"),
-        ("C", "B"),
-        ("T", "A"),
-        ("T", "B"),
-    ]
-    order_sizes = order_sizes[columns_to_keep]
-
-    # Define mappings for action and side
-    action_mapping = {"A": "add", "C": "cancel", "T": "trade"}
-    side_mapping = {"A": "ask", "B": "bid"}
-
-    # Rename columns
-    order_sizes.columns = [
-        f"{action_mapping[action]}_{side_mapping[side]}_size"
-        for action, side in order_sizes.columns
+    # Rename columns for clarity
+    resampled_data.columns = [
+        "mid_price_first",
+        "mid_price_last",
+        "mid_price_high",
+        "mid_price_low",
+        "mean_mid_price",
+        "std_mid_price",
+        "best_bid_price",
+        "mean_best_bid_price",
+        "std_best_bid_price",
+        "best_ask_price",
+        "mean_best_ask_price",
+        "std_best_ask_price",
+        "best_bid_size",
+        "mean_best_bid_size",
+        "std_best_bid_size",
+        "best_ask_size",
+        "mean_best_ask_size",
+        "std_best_ask_size",
+        "mean_second_bid_ask_spread",
+        "mean_second_bid_price",
     ]
 
-    order_sizes["net_add_ask_size"] = (
-        order_sizes["add_ask_size"] - order_sizes["cancel_ask_size"]
+    # Forward-fill missing bid/ask sizes
+    resampled_data[["best_bid_size", "best_ask_size"]] = resampled_data[
+        ["best_bid_size", "best_ask_size"]
+    ].ffill()
+
+    # Compute derived features
+    resampled_data["bid_ask_spread"] = (
+        resampled_data["best_ask_price"] - resampled_data["best_bid_price"]
     )
-    order_sizes["net_add_bid_size"] = (
-        order_sizes["add_bid_size"] - order_sizes["cancel_bid_size"]
+    resampled_data["mid_price_variation"] = (
+        resampled_data["mid_price_last"] / resampled_data["mid_price_first"] - 1
+    )
+    resampled_data["mid_price_variation_class"] = (
+        np.sign(resampled_data["mid_price_variation"]) + 1
     )
 
-    order_sizes.drop(
-        columns=["add_ask_size", "add_bid_size", "cancel_ask_size", "cancel_bid_size"],
-        inplace=True,
+    # Compute trade-related values
+    trade_prices = (
+        df.loc[trade_mask, "price"]
+        .resample(resample_rate)
+        .agg(["first", "last", "max", "min"])
+    )
+    trade_prices.columns = ["trade_open", "trade_close", "trade_high", "trade_low"]
+
+    # Compute total bid/ask volume (additions - cancellations)
+    resampled_data["total_bid_volume"] = df.loc[add_mask & bid_mask, "size"].astype(
+        "int64"
+    ).resample(resample_rate).sum().fillna(0) - df.loc[
+        cancel_mask & bid_mask, "size"
+    ].astype(
+        "int64"
+    ).resample(
+        resample_rate
+    ).sum().fillna(
+        0
+    )
+    resampled_data["total_ask_volume"] = df.loc[add_mask & ask_mask, "size"].astype(
+        "int64"
+    ).resample(resample_rate).sum().fillna(0) - df.loc[
+        cancel_mask & ask_mask, "size"
+    ].astype(
+        "int64"
+    ).resample(
+        resample_rate
+    ).sum().fillna(
+        0
     )
 
-    return order_sizes
+    # Compute order book imbalance metrics
+    resampled_data["mean_order_book_imbalance"] = (
+        resampled_data["mean_best_bid_size"] - resampled_data["mean_best_ask_size"]
+    )
+    resampled_data["mean_volume_ratio_bid_ask"] = (
+        resampled_data["mean_best_bid_size"] / resampled_data["mean_best_ask_size"]
+    )
+    resampled_data["total_net_order_flow"] = resampled_data["best_bid_size"].astype(
+        "int64"
+    ) - resampled_data["best_ask_size"].astype("int64")
+
+    # Count order actions
+    resampled_data["num_added_orders"] = df.loc[add_mask].resample(resample_rate).size()
+    resampled_data["num_canceled_orders"] = (
+        df.loc[cancel_mask].resample(resample_rate).size()
+    )
+    resampled_data["num_traded_orders"] = (
+        df.loc[trade_mask].resample(resample_rate).size()
+    )
+
+    # Compute rolling averages (5s window)
+    resampled_data["order_book_imbalance_5s"] = (
+        resampled_data["mean_order_book_imbalance"].rolling(5).mean()
+    )
+    resampled_data["volume_ratio_5s"] = (
+        resampled_data["mean_volume_ratio_bid_ask"].rolling(5).mean()
+    )
+    resampled_data["order_flow_5s"] = (
+        resampled_data["total_net_order_flow"].rolling(5).mean()
+    )
+
+    # Merge trade data with resampled data
+    resampled_data = resampled_data.merge(
+        trade_prices, left_index=True, right_index=True, how="left"
+    )
+
+    # Drop NaNs from rolling calculations
+    resampled_data.dropna(inplace=True)
+
+    return resampled_data
 
 
-def compute_technical_indicators(df):
+def add_technical_indicators(df):
     """
     Compute technical indicators for a given DataFrame with OHLC-like structure.
     """
     # Make a copy of the DataFrame to avoid modifying the original
     df = df.copy()
-
-    df["Returns"] = df["mid_price_last"].pct_change()
-    df["Target_close"] = np.sign(df["Returns"]) + 1
 
     ### TREND INDICATORS ###
     df["ADX_5"] = ta.trend.ADXIndicator(
@@ -212,7 +236,7 @@ def compute_technical_indicators(df):
     df["MA_10"] = ta.trend.SMAIndicator(df["mid_price_last"], window=10).sma_indicator()
     df["MA_20"] = ta.trend.SMAIndicator(df["mid_price_last"], window=20).sma_indicator()
 
-    # Rolling CO (Close - Open)
+    # Rolling CO (Last - First)
     for w in [3, 4, 5, 6]:
         df[f"rmCO({w})"] = (
             (df["mid_price_last"] - df["mid_price_first"]).rolling(window=w).mean()
@@ -239,87 +263,77 @@ def compute_technical_indicators(df):
     return df.dropna()
 
 
-def add_time_features(combined_df):
+def add_time_features(combined_data):
+    # Ensure the index is a DatetimeIndex
+    if not isinstance(combined_data.index, pd.DatetimeIndex):
+        combined_data.index = pd.to_datetime(combined_data.index)
 
     # Compute seconds since market open (9:30 AM)
-    market_open_time = combined_df.index.normalize() + pd.Timedelta(hours=9, minutes=30)
-    combined_df["time_since_open"] = (
-        combined_df.index - market_open_time
-    ).dt.total_seconds()
+    market_open_time = combined_data.index.normalize() + pd.Timedelta(
+        hours=9, minutes=30
+    )
+    combined_data["time_since_open"] = (
+        combined_data.index - market_open_time
+    ).total_seconds()
 
     # Add binary features for Monday and Friday
-    combined_df["is_monday"] = (combined_df.index.weekday == 0).astype(
+    combined_data["is_monday"] = (combined_data.index.weekday == 0).astype(
         int
     )  # Monday = 0
-    combined_df["is_friday"] = (combined_df.index.weekday == 4).astype(
+    combined_data["is_friday"] = (combined_data.index.weekday == 4).astype(
         int
     )  # Friday = 4
 
-    # Add market session feature (morning = 0, afternoon = 1)
-    combined_df["market_session"] = (
-        combined_df["time_since_open"] > 3.5 * 3600
-    ).astype(int)
-
-    return combined_df
+    return combined_data
 
 
 def process_and_combine_data(
-    start_date,
-    end_date,
-    data_folder="../AAPL_data",
-    sampling_rate="1s",
+    start_date, end_date, data_folder="../AAPL_data", sampling_rate="1s"
 ):
     """
-    Process and combine trade data for a given date range.
+    Processes and combines order book data for a given date range.
 
     Parameters:
-        start_date (str or datetime): Start date of the date range (inclusive).
-        end_date (str or datetime): End date of the date range (inclusive).
-        market_open (str): Market open time (e.g., "09:30").
-        market_close (str): Market close time (e.g., "16:00").
-        data_folder (str): Folder containing the parquet files.
-        sampling_rate (str): Resampling rate for mid prices and order sizes (e.g., "5s").
+    - start_date (str or datetime): Start date for data processing.
+    - end_date (str or datetime): End date for data processing.
+    - data_folder (str): Path to the folder containing parquet files.
+    - sampling_rate (str): Resampling rate for computing order book features.
 
     Returns:
-        all_data (pd.DataFrame): Combined DataFrame containing processed data for all trade days.
+    - DataFrame: Combined and processed data with order book features and technical indicators.
     """
-    # Convert start_date and end_date to datetime
-    start_date = pd.to_datetime(start_date)
-    end_date = pd.to_datetime(end_date)
+    # Convert dates to datetime format
+    start_dt = pd.to_datetime(start_date)
+    end_dt = pd.to_datetime(end_date)
 
-    # Generate business date range
-    date_range = pd.bdate_range(start=start_date, end=end_date)
+    # Generate business days within the date range
+    trading_days = pd.bdate_range(start=start_dt, end=end_dt)
 
-    # Generate file paths
-    data_paths = [
+    # Construct file paths for each trading day
+    file_paths = [
         f"{data_folder}/AAPL_{date.strftime('%Y-%m-%d')}_xnas-itch.parquet"
-        for date in date_range
+        for date in trading_days
     ]
 
-    # Initialize list to store daily data
-    trade_days_data = []
+    # List to store processed data for each day
+    daily_data_list = []
 
-    # Process each file
-    for path in data_paths:
-        # Load data
-        df = load_data(path)
+    # Process each day's data
+    for file_path in file_paths:
+        # Load raw data and filter by market hours
+        raw_data = pd.read_parquet(file_path).between_time(market_open, market_close)
 
-        # Compute order sizes
-        order_sizes = group_and_pivot_order_sizes(df, sampling_rate=sampling_rate)
+        # Compute order book features
+        order_book_data = compute_order_book_features(raw_data, sampling_rate)
 
-        # Compute mid prices
-        mid_prices = resample_mid_prices(df, sampling_rate=sampling_rate)
+        # Add technical indicators
+        enriched_data = add_technical_indicators(order_book_data)
 
-        # Reindex order sizes to match mid prices
-        order_sizes = order_sizes.reindex(mid_prices.index, fill_value=0)
+        # Store processed data
+        daily_data_list.append(enriched_data)
 
-        # Compute technical indicators
-        technical_indicators = compute_technical_indicators(mid_prices)
+    # Concatenate all processed daily data
+    combined_data = pd.concat(daily_data_list)
 
-        df_combined = order_sizes.join(technical_indicators, how="inner")
-
-        trade_days_data.append(df_combined)
-
-    all_data = pd.concat(trade_days_data)
-
-    return add_time_features(all_data)
+    # Add time-based features and return final dataset
+    return add_time_features(combined_data)

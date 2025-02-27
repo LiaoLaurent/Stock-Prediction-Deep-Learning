@@ -9,51 +9,30 @@ import numpy as np
 
 
 class TimeSeriesScalerGenerator(Sequence):
-    def __init__(
-        self,
-        data,
-        target,
-        features,
-        standard_features,
-        minmax_features,
-        unscaled_features,
-        look_back,
-        batch_size=32,
-        **kwargs
-    ):
+    def __init__(self, data, target, features, look_back, batch_size=32, **kwargs):
         """
-        Custom Timeseries Generator with pre-scaled data.
+        Time Series Data Generator with Standard Scaling Per Sample.
 
         Args:
             data (pd.DataFrame): DataFrame with feature columns.
             target (str): Target column name.
             features (list): List of all feature column names.
-            standard_features (list): Features to be standardized.
-            minmax_features (list): Features to be Min-Max scaled.
-            unscaled_features (list): Features to remain unscaled.
             look_back (int): Number of past time steps per sample.
             batch_size (int): Batch size.
         """
         super().__init__(**kwargs)
 
-        self.data = data[features].values  # Extract feature matrix
-        self.targets = data[target].values.astype(int)  # Extract target labels
+        self.data = data[features].values  # Feature matrix
+        self.targets = data[target].values.astype(int)  # Target labels
         self.features = features
-        self.standard_features = standard_features
-        self.minmax_features = minmax_features
-        self.unscaled_features = unscaled_features
         self.look_back = look_back
         self.batch_size = batch_size
 
-        self.standard_indices = [features.index(f) for f in standard_features]
-        self.minmax_indices = [features.index(f) for f in minmax_features]
-        self.unscaled_indices = [features.index(f) for f in unscaled_features]
-
+        # Compute valid indices for sequence extraction
         self.indices = np.arange(len(data) - look_back)
-        self.true_labels = self._extract_true_labels()
 
     def __len__(self):
-        """Number of batches per epoch."""
+        """Returns number of batches per epoch."""
         return int(np.ceil(len(self.indices) / self.batch_size))
 
     def __getitem__(self, idx):
@@ -62,38 +41,23 @@ class TimeSeriesScalerGenerator(Sequence):
             idx * self.batch_size : (idx + 1) * self.batch_size
         ]
 
-        # Extract sequences efficiently using list slicing
+        # Extract sequences
         batch_data = np.array(
             [self.data[i : i + self.look_back] for i in batch_indices]
         )
 
-        # Preallocate arrays for batch
-        X_batch = np.empty(
-            (len(batch_indices), self.look_back, len(self.features)), dtype=np.float32
+        # Allocate space for scaled batch
+        X_batch = np.empty_like(batch_data, dtype=np.float32)
+        y_batch = np.array(
+            [self.targets[i + self.look_back] for i in batch_indices], dtype=np.int32
         )
-        y_batch = np.empty(len(batch_indices), dtype=np.int32)
 
-        # Scale using precomputed scalers
-        standard_scaler = StandardScaler()
-        minmax_scaler = MinMaxScaler(feature_range=(0, 1))
-
+        # Standardize each sequence individually
         for i, seq in enumerate(batch_data):
-            seq_standard = standard_scaler.fit_transform(seq[:, self.standard_indices])
-            seq_minmax = minmax_scaler.fit_transform(seq[:, self.minmax_indices])
-            seq_unscaled = (
-                seq[:, self.unscaled_indices]
-                if self.unscaled_features
-                else np.empty((self.look_back, 0))
-            )
-
-            X_batch[i] = np.hstack((seq_standard, seq_minmax, seq_unscaled))
-            y_batch[i] = self.targets[batch_indices[i] + self.look_back]
+            scaler = MinMaxScaler(feature_range=(0, 1))
+            X_batch[i] = scaler.fit_transform(seq)
 
         return X_batch, y_batch
-
-    def _extract_true_labels(self):
-        """Extract all true labels for the entire dataset."""
-        return np.array([self.targets[i + self.look_back] for i in self.indices])
 
 
 class TimeSeriesGenerator(Sequence):
@@ -115,6 +79,11 @@ class TimeSeriesGenerator(Sequence):
         self.batch_size = batch_size
         self.indices = np.arange(len(scaled_data) - look_back)
 
+        # Store true labels for the entire dataset
+        self.true_labels = np.array(
+            [self.targets[i + self.look_back] for i in self.indices]
+        )
+
     def __len__(self):
         """Number of batches per epoch."""
         return int(np.ceil(len(self.indices) / self.batch_size))
@@ -127,6 +96,6 @@ class TimeSeriesGenerator(Sequence):
 
         # Extract sequences efficiently
         X_batch = np.array([self.data[i : i + self.look_back] for i in batch_indices])
-        y_batch = np.array([self.targets[i + self.look_back] for i in batch_indices])
+        y_batch = self.true_labels[batch_indices]
 
         return X_batch, y_batch
