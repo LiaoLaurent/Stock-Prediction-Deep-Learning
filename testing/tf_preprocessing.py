@@ -8,7 +8,6 @@ market_close = pd.Timestamp("16:00:00").time()
 
 def load_data(data_path):
     df = pd.read_parquet(data_path)
-    df = df.reset_index().set_index("ts_event")
     return df.between_time(market_open, market_close)
 
 
@@ -241,41 +240,25 @@ def compute_technical_indicators(df):
 
 
 def add_time_features(combined_df):
-    """
-    Add time-based features to the combined DataFrame.
 
-    Parameters:
-        combined_df (pd.DataFrame): The input DataFrame with a DateTime index.
-
-    Returns:
-        combined_df (pd.DataFrame): The DataFrame with added time-based features.
-    """
-    # Add market open time for each day (9:30 AM)
-    combined_df["market_open_time"] = combined_df.index.normalize() + pd.Timedelta(
-        hours=9, minutes=30
-    )
-
-    # Compute seconds since market open
+    # Compute seconds since market open (9:30 AM)
+    market_open_time = combined_df.index.normalize() + pd.Timedelta(hours=9, minutes=30)
     combined_df["time_since_open"] = (
-        combined_df.index - combined_df["market_open_time"]
+        combined_df.index - market_open_time
     ).dt.total_seconds()
 
-    # Encode day of the week as one-hot vectors
-    combined_df["day_of_week"] = (
-        combined_df.index.weekday
-    )  # Extract day of the week (0=Monday, 6=Sunday)
-    combined_df = pd.get_dummies(combined_df, columns=["day_of_week"], prefix="dow")
-
-    # Convert one-hot columns to integers (0 or 1)
-    one_hot_columns = [col for col in combined_df.columns if col.startswith("dow_")]
-    combined_df[one_hot_columns] = combined_df[one_hot_columns].astype(int)
+    # Add binary features for Monday and Friday
+    combined_df["is_monday"] = (combined_df.index.weekday == 0).astype(
+        int
+    )  # Monday = 0
+    combined_df["is_friday"] = (combined_df.index.weekday == 4).astype(
+        int
+    )  # Friday = 4
 
     # Add market session feature (morning = 0, afternoon = 1)
     combined_df["market_session"] = (
-        combined_df["time_since_open"] > 3.5 * 3600  # 3.5 hours after market open
+        combined_df["time_since_open"] > 3.5 * 3600
     ).astype(int)
-
-    combined_df.drop(columns=["market_open_time"], inplace=True)
 
     return combined_df
 

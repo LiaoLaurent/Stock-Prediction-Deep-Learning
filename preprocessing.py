@@ -3,14 +3,13 @@ import pandas as pd
 import ta
 import matplotlib.pyplot as plt
 
-market_open_time = "09:30:00"
-market_close_time = "16:00:00"
+market_open = pd.Timestamp("09:30:00").time()
+market_close = pd.Timestamp("16:00:00").time()
 
 
 def load_data(data_path):
     df = pd.read_parquet(data_path)
-    df = df.reset_index().set_index("ts_event")
-    return df
+    return df.between_time(market_open, market_close)
 
 
 def calculate_mid_price(df):
