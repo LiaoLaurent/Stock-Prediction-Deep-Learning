@@ -19,31 +19,6 @@ def compute_order_book_features(
 
     df["bid_ask_spread"] = df["ask_px_00"] - df["bid_px_00"]
 
-    # Compute price derivatives before resampling
-    df["dP_ask_dt"] = (
-        df["ask_px_00"].diff() / df.index.to_series().diff().dt.total_seconds()
-    )
-    df["dP_bid_dt"] = (
-        df["bid_px_00"].diff() / df.index.to_series().diff().dt.total_seconds()
-    )
-
-    # Compute volume derivatives before resampling
-    df["dV_ask_dt"] = (
-        df["ask_sz_00"].diff() / df.index.to_series().diff().dt.total_seconds()
-    )
-    df["dV_bid_dt"] = (
-        df["bid_sz_00"].diff() / df.index.to_series().diff().dt.total_seconds()
-    )
-
-    price_volume_rate = df.resample(resample_rate).agg(
-        {
-            "dP_ask_dt": "mean",
-            "dP_bid_dt": "mean",
-            "dV_ask_dt": "mean",
-            "dV_bid_dt": "mean",
-        }
-    )
-
     # Precompute masks for filtering specific actions
     trade_mask = df["action"] == "T"
     add_mask = df["action"] == "A"
@@ -67,34 +42,34 @@ def compute_order_book_features(
 
     # Rename columns for clarity
     resampled_data.columns = [
-        "mid_price_first",
+        "mid_price_first",  # mid price
         "mid_price_last",
         "mid_price_high",
         "mid_price_low",
         "mean_mid_price",
         "std_mid_price",
-        "last_spread",
+        "last_spread",  # bid-ask spread
         "mean_spread",
-        "std_spread",  # bid-ask spread
-        "best_bid_price",
+        "std_spread",
+        "last_best_bid_price",  # bid price
         "mean_best_bid_price",
         "std_best_bid_price",
-        "best_ask_price",
+        "last_best_ask_price",  # ask price
         "mean_best_ask_price",
         "std_best_ask_price",
-        "best_bid_size",
+        "last_best_bid_size",  # bid size
         "mean_best_bid_size",
         "std_best_bid_size",
-        "best_ask_size",
+        "last_best_ask_size",  # ask size
         "mean_best_ask_size",
         "std_best_ask_size",
-        "mean_second_bid_ask_spread",
-        "mean_second_bid_price",
+        "mean_second_ask_price",  # mean second ask price
+        "mean_second_bid_price",  # mean second bid price
     ]
 
     # Forward-fill missing bid/ask sizes
-    resampled_data[["best_bid_size", "best_ask_size"]] = resampled_data[
-        ["best_bid_size", "best_ask_size"]
+    resampled_data[["last_best_bid_size", "last_best_ask_size"]] = resampled_data[
+        ["last_best_bid_size", "last_best_ask_size"]
     ].ffill()
 
     # Compute derived features
@@ -152,9 +127,9 @@ def compute_order_book_features(
     resampled_data["mean_volume_ratio_bid_ask"] = (
         resampled_data["mean_best_bid_size"] / resampled_data["mean_best_ask_size"]
     )
-    resampled_data["total_net_order_flow"] = resampled_data["best_bid_size"].astype(
-        "int64"
-    ) - resampled_data["best_ask_size"].astype("int64")
+    resampled_data["total_net_order_flow"] = resampled_data[
+        "last_best_bid_size"
+    ].astype("int64") - resampled_data["last_best_ask_size"].astype("int64")
 
     # Count order actions
     resampled_data["num_added_orders"] = df.loc[add_mask].resample(resample_rate).size()
@@ -176,10 +151,16 @@ def compute_order_book_features(
         resampled_data["total_net_order_flow"].rolling(5).mean()
     )
 
+    # Compute bid/ask price/volume variations
+    resampled_data["bid_volume_variation"] = resampled_data["last_best_bid_size"].diff()
+    resampled_data["ask_volume_variation"] = resampled_data["last_best_ask_size"].diff()
+    resampled_data["bid_price_variation"] = resampled_data["last_best_bid_price"].diff()
+    resampled_data["ask_price_variation"] = resampled_data["last_best_ask_price"].diff()
+
     # Merge trade data with resampled data
     resampled_data = resampled_data.merge(
         trade_prices, left_index=True, right_index=True, how="left"
-    ).merge(price_volume_rate, left_index=True, right_index=True, how="left")
+    )
 
     # Drop NaNs after merging
     resampled_data.dropna(inplace=True)
