@@ -6,7 +6,9 @@ market_open = pd.Timestamp("09:30:00").time()
 market_close = pd.Timestamp("16:00:00").time()
 
 
-def compute_order_book_features(raw_data, resample_rate):
+def compute_order_book_features(
+    raw_data, resample_rate, mid_price_variation_class_threshold
+):
 
     df = raw_data.copy()
 
@@ -14,6 +16,33 @@ def compute_order_book_features(raw_data, resample_rate):
     df["mid_price"] = df[["ask_px_00", "bid_px_00"]].mean(axis=1)
     df["mid_price"] = df["mid_price"].fillna(df["ask_px_00"])
     df["mid_price"] = df["mid_price"].fillna(df["bid_px_00"])
+
+    df["bid_ask_spread"] = df["ask_px_00"] - df["bid_px_00"]
+
+    # Compute price derivatives before resampling
+    df["dP_ask_dt"] = (
+        df["ask_px_00"].diff() / df.index.to_series().diff().dt.total_seconds()
+    )
+    df["dP_bid_dt"] = (
+        df["bid_px_00"].diff() / df.index.to_series().diff().dt.total_seconds()
+    )
+
+    # Compute volume derivatives before resampling
+    df["dV_ask_dt"] = (
+        df["ask_sz_00"].diff() / df.index.to_series().diff().dt.total_seconds()
+    )
+    df["dV_bid_dt"] = (
+        df["bid_sz_00"].diff() / df.index.to_series().diff().dt.total_seconds()
+    )
+
+    price_volume_rate = df.resample(resample_rate).agg(
+        {
+            "dP_ask_dt": "mean",
+            "dP_bid_dt": "mean",
+            "dV_ask_dt": "mean",
+            "dV_bid_dt": "mean",
+        }
+    )
 
     # Precompute masks for filtering specific actions
     trade_mask = df["action"] == "T"
@@ -26,6 +55,7 @@ def compute_order_book_features(raw_data, resample_rate):
     resampled_data = df.resample(resample_rate).agg(
         {
             "mid_price": ["first", "last", "max", "min", "mean", "std"],
+            "bid_ask_spread": ["last", "mean", "std"],
             "bid_px_00": ["last", "mean", "std"],
             "ask_px_00": ["last", "mean", "std"],
             "bid_sz_00": ["last", "mean", "std"],
@@ -43,6 +73,9 @@ def compute_order_book_features(raw_data, resample_rate):
         "mid_price_low",
         "mean_mid_price",
         "std_mid_price",
+        "last_spread",
+        "mean_spread",
+        "std_spread",  # bid-ask spread
         "best_bid_price",
         "mean_best_bid_price",
         "std_best_bid_price",
@@ -65,14 +98,19 @@ def compute_order_book_features(raw_data, resample_rate):
     ].ffill()
 
     # Compute derived features
-    resampled_data["bid_ask_spread"] = (
-        resampled_data["best_ask_price"] - resampled_data["best_bid_price"]
-    )
     resampled_data["mid_price_variation"] = (
         resampled_data["mid_price_last"] / resampled_data["mid_price_first"] - 1
     )
-    resampled_data["mid_price_variation_class"] = (
-        np.sign(resampled_data["mid_price_variation"]) + 1
+    resampled_data["mid_price_variation_class"] = resampled_data[
+        "mid_price_variation_class"
+    ] = (
+        np.where(
+            np.abs(resampled_data["mid_price_variation"])
+            > mid_price_variation_class_threshold,
+            np.sign(resampled_data["mid_price_variation"]),
+            0,
+        )
+        + 1
     )
 
     # Compute trade-related values
@@ -141,9 +179,9 @@ def compute_order_book_features(raw_data, resample_rate):
     # Merge trade data with resampled data
     resampled_data = resampled_data.merge(
         trade_prices, left_index=True, right_index=True, how="left"
-    )
+    ).merge(price_volume_rate, left_index=True, right_index=True, how="left")
 
-    # Drop NaNs from rolling calculations
+    # Drop NaNs after merging
     resampled_data.dropna(inplace=True)
 
     return resampled_data
@@ -288,7 +326,11 @@ def add_time_features(combined_data):
 
 
 def process_and_combine_data(
-    start_date, end_date, data_folder="../AAPL_data", sampling_rate="1s"
+    start_date,
+    end_date,
+    mid_price_variation_class_threshold,
+    data_folder="../AAPL_data",
+    sampling_rate="1s",
 ):
     """
     Processes and combines order book data for a given date range.
@@ -324,7 +366,9 @@ def process_and_combine_data(
         raw_data = pd.read_parquet(file_path).between_time(market_open, market_close)
 
         # Compute order book features
-        order_book_data = compute_order_book_features(raw_data, sampling_rate)
+        order_book_data = compute_order_book_features(
+            raw_data, sampling_rate, mid_price_variation_class_threshold
+        )
 
         # Add technical indicators
         enriched_data = add_technical_indicators(order_book_data)
