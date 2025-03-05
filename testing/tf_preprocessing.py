@@ -302,25 +302,25 @@ def add_technical_indicators(df):
     df["STOCHd_7_3_3"] = df["STOCHd_7_3_3"].ffill()
 
     df["MACD_8_21_5"] = ta.trend.MACD(
-        df["mid_price_last"], window_slow=21, window_fast=8, window_sign=5
+        df["mid_price_mean"], window_slow=21, window_fast=8, window_sign=5
     ).macd_diff()
-    df["RSI_7"] = ta.momentum.RSIIndicator(df["mid_price_last"], window=7).rsi()
+    df["RSI_7"] = ta.momentum.RSIIndicator(df["mid_price_mean"], window=7).rsi()
     df["AO_5_10"] = ta.momentum.AwesomeOscillatorIndicator(
         df["mid_price_high"], df["mid_price_low"], window1=5, window2=10
     ).awesome_oscillator()
 
     ### MOVING AVERAGES ###
     df["EMA_15"] = ta.trend.EMAIndicator(
-        df["mid_price_last"], window=15
+        df["mid_price_mean"], window=15
     ).ema_indicator()
     df["HMA_10"] = ta.trend.WMAIndicator(
-        df["mid_price_last"], window=10
+        df["mid_price_mean"], window=10
     ).wma()  # HMA is not directly available in 'ta', using WMA as a placeholder
     df["KAMA_3_2_10"] = ta.momentum.KAMAIndicator(
-        df["mid_price_last"], window=3, pow1=2, pow2=10
+        df["mid_price_mean"], window=3, pow1=2, pow2=10
     ).kama()
-    df["MA_10"] = ta.trend.SMAIndicator(df["mid_price_last"], window=10).sma_indicator()
-    df["MA_20"] = ta.trend.SMAIndicator(df["mid_price_last"], window=20).sma_indicator()
+    df["MA_10"] = ta.trend.SMAIndicator(df["mid_price_mean"], window=10).sma_indicator()
+    df["MA_20"] = ta.trend.SMAIndicator(df["mid_price_mean"], window=20).sma_indicator()
 
     # Rolling CO (Last - First)
     for w in [3, 4, 5, 6]:
@@ -330,10 +330,10 @@ def add_technical_indicators(df):
 
     ### VOLATILITY INDICATORS ###
     df["Bollinger_Upper"] = ta.volatility.BollingerBands(
-        df["mid_price_last"], window=20, window_dev=2
+        df["mid_price_mean"], window=20, window_dev=2
     ).bollinger_hband()
     df["Bollinger_Lower"] = ta.volatility.BollingerBands(
-        df["mid_price_last"], window=20, window_dev=2
+        df["mid_price_mean"], window=20, window_dev=2
     ).bollinger_lband()
     df["U_minus_L"] = df["Bollinger_Upper"] - df["Bollinger_Lower"]
     df["MA20dSTD"] = df["mid_price_last"].rolling(window=20).std()
