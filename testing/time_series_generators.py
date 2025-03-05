@@ -2,14 +2,9 @@ from tensorflow.keras.utils import Sequence
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import numpy as np
 
-# # Format for scaling indices definition
-# standard_indices = [features.index(f) for f in standard_features]
-# minmax_indices = [features.index(f) for f in minmax_features]
-# unscaled_indices = [features.index(f) for f in unscaled_features]
-
 
 class TimeSeriesScalerGenerator(Sequence):
-    def __init__(self, data, target, features, look_back, batch_size=32, **kwargs):
+    def __init__(self, data, target, features, look_back, batch_size, **kwargs):
         """
         Time Series Data Generator with Standard Scaling Per Sample.
 

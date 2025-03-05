@@ -113,7 +113,7 @@ def compute_order_book_features(
     order_book_data["mid_price_variation"] = (
         order_book_data["mid_price_last"] / order_book_data["mid_price_first"] - 1
     )
-    # Classify mid-price variations
+    # Classify mid-price variations based on a threshold
     order_book_data["mid_price_variation_class"] = order_book_data[
         "mid_price_variation_class"
     ] = (
@@ -138,7 +138,7 @@ def compute_order_book_features(
         / order_book_data["weighted_mid_price_first"]
         - 1
     )
-    # Classify weighted mid-price variations
+    # Classify weighted mid-price variations based on a threshold
     order_book_data["weighted_mid_price_variation_class"] = (
         order_book_data["weighted_mid_price_variation"] > 0
     ).astype(int)
