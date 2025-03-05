@@ -130,7 +130,11 @@ def compute_order_book_features(
     )
     # Classify mean mid-price variations
     order_book_data["mean_mid_price_variation_class"] = (
-        order_book_data["mean_mid_price_variation"] > 0
+        order_book_data["mean_mid_price_variation"] >= 0
+    ).astype(int)
+    order_book_data["next_5_mean_mid_price_variation_class"] = (
+        order_book_data["mean_mid_price_variation"].shift(-4).rolling(window=5).mean()
+        > 0
     ).astype(int)
 
     order_book_data["weighted_mid_price_variation"] = (
