@@ -1,1 +1,1 @@
-Run notebook returns_predictions.ipynb to get results
+Deep Learning Project for Returns predictions
