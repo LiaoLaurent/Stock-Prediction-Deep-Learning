@@ -113,7 +113,7 @@ def compute_order_book_features(
     order_book_data["mid_price_variation"] = (
         order_book_data["mid_price_last"] / order_book_data["mid_price_first"] - 1
     )
-    # Classify mid-price variations based on a threshold
+    # Classify mid-price variations
     order_book_data["mid_price_variation_class"] = order_book_data[
         "mid_price_variation_class"
     ] = (
@@ -130,7 +130,11 @@ def compute_order_book_features(
     )
     # Classify mean mid-price variations
     order_book_data["mean_mid_price_variation_class"] = (
-        order_book_data["mean_mid_price_variation"] > 0
+        order_book_data["mean_mid_price_variation"] >= 0
+    ).astype(int)
+    order_book_data["next_5_mean_mid_price_variation_class"] = (
+        order_book_data["mean_mid_price_variation"].shift(-4).rolling(window=5).mean()
+        > 0
     ).astype(int)
 
     order_book_data["weighted_mid_price_variation"] = (
@@ -138,7 +142,7 @@ def compute_order_book_features(
         / order_book_data["weighted_mid_price_first"]
         - 1
     )
-    # Classify weighted mid-price variations based on a threshold
+    # Classify weighted mid-price variations
     order_book_data["weighted_mid_price_variation_class"] = (
         order_book_data["weighted_mid_price_variation"] > 0
     ).astype(int)
@@ -302,25 +306,25 @@ def add_technical_indicators(df):
     df["STOCHd_7_3_3"] = df["STOCHd_7_3_3"].ffill()
 
     df["MACD_8_21_5"] = ta.trend.MACD(
-        df["mid_price_last"], window_slow=21, window_fast=8, window_sign=5
+        df["mid_price_mean"], window_slow=21, window_fast=8, window_sign=5
     ).macd_diff()
-    df["RSI_7"] = ta.momentum.RSIIndicator(df["mid_price_last"], window=7).rsi()
+    df["RSI_7"] = ta.momentum.RSIIndicator(df["mid_price_mean"], window=7).rsi()
     df["AO_5_10"] = ta.momentum.AwesomeOscillatorIndicator(
         df["mid_price_high"], df["mid_price_low"], window1=5, window2=10
     ).awesome_oscillator()
 
     ### MOVING AVERAGES ###
     df["EMA_15"] = ta.trend.EMAIndicator(
-        df["mid_price_last"], window=15
+        df["mid_price_mean"], window=15
     ).ema_indicator()
     df["HMA_10"] = ta.trend.WMAIndicator(
-        df["mid_price_last"], window=10
+        df["mid_price_mean"], window=10
     ).wma()  # HMA is not directly available in 'ta', using WMA as a placeholder
     df["KAMA_3_2_10"] = ta.momentum.KAMAIndicator(
-        df["mid_price_last"], window=3, pow1=2, pow2=10
+        df["mid_price_mean"], window=3, pow1=2, pow2=10
     ).kama()
-    df["MA_10"] = ta.trend.SMAIndicator(df["mid_price_last"], window=10).sma_indicator()
-    df["MA_20"] = ta.trend.SMAIndicator(df["mid_price_last"], window=20).sma_indicator()
+    df["MA_10"] = ta.trend.SMAIndicator(df["mid_price_mean"], window=10).sma_indicator()
+    df["MA_20"] = ta.trend.SMAIndicator(df["mid_price_mean"], window=20).sma_indicator()
 
     # Rolling CO (Last - First)
     for w in [3, 4, 5, 6]:
@@ -330,10 +334,10 @@ def add_technical_indicators(df):
 
     ### VOLATILITY INDICATORS ###
     df["Bollinger_Upper"] = ta.volatility.BollingerBands(
-        df["mid_price_last"], window=20, window_dev=2
+        df["mid_price_mean"], window=20, window_dev=2
     ).bollinger_hband()
     df["Bollinger_Lower"] = ta.volatility.BollingerBands(
-        df["mid_price_last"], window=20, window_dev=2
+        df["mid_price_mean"], window=20, window_dev=2
     ).bollinger_lband()
     df["U_minus_L"] = df["Bollinger_Upper"] - df["Bollinger_Lower"]
     df["MA20dSTD"] = df["mid_price_last"].rolling(window=20).std()
@@ -362,13 +366,11 @@ def add_time_features(combined_data):
         combined_data.index - market_open_time
     ).total_seconds()
 
-    # Add binary features for Monday and Friday
-    combined_data["is_monday"] = (combined_data.index.weekday == 0).astype(
-        int
-    )  # Monday = 0
-    combined_data["is_friday"] = (combined_data.index.weekday == 4).astype(
-        int
-    )  # Friday = 4
+    combined_data["is_monday"] = (combined_data.index.weekday == 0).astype(int)
+    combined_data["is_tuesday"] = (combined_data.index.weekday == 1).astype(int)
+    combined_data["is_wednesday"] = (combined_data.index.weekday == 2).astype(int)
+    combined_data["is_thursday"] = (combined_data.index.weekday == 3).astype(int)
+    combined_data["is_friday"] = (combined_data.index.weekday == 4).astype(int)
 
     return combined_data
 

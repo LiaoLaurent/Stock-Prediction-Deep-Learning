@@ -366,13 +366,11 @@ def add_time_features(combined_data):
         combined_data.index - market_open_time
     ).total_seconds()
 
-    # Add binary features for Monday and Friday
-    combined_data["is_monday"] = (combined_data.index.weekday == 0).astype(
-        int
-    )  # Monday = 0
-    combined_data["is_friday"] = (combined_data.index.weekday == 4).astype(
-        int
-    )  # Friday = 4
+    combined_data["is_monday"] = (combined_data.index.weekday == 0).astype(int)
+    combined_data["is_tuesday"] = (combined_data.index.weekday == 1).astype(int)
+    combined_data["is_wednesday"] = (combined_data.index.weekday == 2).astype(int)
+    combined_data["is_thursday"] = (combined_data.index.weekday == 3).astype(int)
+    combined_data["is_friday"] = (combined_data.index.weekday == 4).astype(int)
 
     return combined_data
 
