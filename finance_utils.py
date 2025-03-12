@@ -79,6 +79,7 @@ def backtest_strategy(
 
     # Group by day to compute daily P&L (for annualized metrics)
     df["date"] = df["timestamp"].dt.date
+    num_days = len(df["date"].unique())
 
     # Compute daily P&L using a safer approach
     def compute_daily_pnl(group):
@@ -101,7 +102,9 @@ def backtest_strategy(
 
     # Compile results
     results = {
+        "initial_capital": initial_capital,
         "final_capital": final_capital,
+        "time": num_days,
         "pnl": pnl,
         "cumulative_pnl": cumulative_pnl,
         "daily_pnl": daily_pnl,
@@ -124,7 +127,10 @@ def plot_backtest_results(results, label="Strategy"):
     """
     # Display all computed metrics with the label
     print(f"\nBacktest Metrics for {label}:")
-    print(f"Final Capital: {results['final_capital']:.2f}")
+    print(f"Duration: {results["time"]} days")
+    print(
+        f"Initial Capital: {results['initial_capital']:.2f}, Final Capital: {results['final_capital']:.2f}"
+    )
     print(f"Annualized Return: {results['annualized_return']:.2%}")
     print(f"Annualized Volatility: {results['annualized_volatility']:.2%}")
 
