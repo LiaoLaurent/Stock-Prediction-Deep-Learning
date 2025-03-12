@@ -3,3 +3,4 @@
 /tensorflow_files
 **/__pycache__
 all_data.parquet
+ARIMA_predictions.parquet
