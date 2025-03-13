@@ -12,29 +12,27 @@ def compute_order_book_features(
 
     df = raw_data.copy()
 
-    # Compute the mid-price as the average of best bid/ask prices
+    # Mid-price as the average of best bid/ask prices
     df["mid_price"] = df[["ask_px_00", "bid_px_00"]].mean(axis=1)
     df["mid_price"] = df["mid_price"].fillna(df["ask_px_00"])
     df["mid_price"] = df["mid_price"].fillna(df["bid_px_00"])
 
-    # Compute the bid-ask spread
+    # Bid-ask spread
     df["bid_ask_spread"] = df["ask_px_00"] - df["bid_px_00"]
 
-    # Compute the mid-price as the average of best bid/ask prices
+    # Weighted mid-price as the average of best bid/ask prices
     df["weighted_mid_price"] = (
         df["ask_px_00"] * df["bid_sz_00"] + df["bid_px_00"] * df["ask_sz_00"]
     ) / (df["bid_sz_00"] + df["ask_sz_00"])
     df["weighted_mid_price"] = df["weighted_mid_price"].fillna(df["ask_px_00"])
     df["weighted_mid_price"] = df["weighted_mid_price"].fillna(df["bid_px_00"])
 
-    # Precompute masks for filtering specific actions
     trade_mask = df["action"] == "T"
     add_mask = df["action"] == "A"
     cancel_mask = df["action"] == "C"
     bid_mask = df["side"] == "B"
     ask_mask = df["side"] == "A"
 
-    # Aggregate resampled data using efficient functions
     order_book_data = df.resample(resample_rate).agg(
         {
             "mid_price": ["first", "last", "max", "min", "mean", "std"],
@@ -49,7 +47,6 @@ def compute_order_book_features(
         }
     )
 
-    # Rename columns for clarity
     order_book_data.columns = [
         "mid_price_first",  # mid price
         "mid_price_last",
@@ -228,22 +225,17 @@ def compute_order_book_features(
         order_book_data["last_best_ask_price"].astype("int64").diff()
     )
 
-    # Merge trade data with resampled data
     order_book_data = order_book_data.merge(
         trade_prices, left_index=True, right_index=True, how="left"
     )
 
-    # Drop NaNs after merging
     order_book_data.dropna(inplace=True)
 
     return order_book_data
 
 
 def add_technical_indicators(df):
-    """
-    Compute technical indicators for a given DataFrame with OHLC-like structure.
-    """
-    # Make a copy of the DataFrame to avoid modifying the original
+
     df = df.copy()
 
     ### TREND INDICATORS ###
@@ -269,7 +261,6 @@ def add_technical_indicators(df):
         df["mid_price_high"], df["mid_price_low"], df["mid_price_last"], window=10
     ).adx_neg()
 
-    # Aroon Indicator requires both high and low prices
     df["AROONU_7"] = ta.trend.AroonIndicator(
         df["mid_price_high"], df["mid_price_low"], window=7
     ).aroon_up()
@@ -301,7 +292,6 @@ def add_technical_indicators(df):
         smooth_window=3,
     ).stoch_signal()
 
-    # Avoid NaN Stochastic values
     df["STOCHk_7_3_3"] = df["STOCHk_7_3_3"].ffill()
     df["STOCHd_7_3_3"] = df["STOCHd_7_3_3"].ffill()
 
@@ -317,9 +307,7 @@ def add_technical_indicators(df):
     df["EMA_15"] = ta.trend.EMAIndicator(
         df["mid_price_mean"], window=15
     ).ema_indicator()
-    df["HMA_10"] = ta.trend.WMAIndicator(
-        df["mid_price_mean"], window=10
-    ).wma()  # HMA is not directly available in 'ta', using WMA as a placeholder
+    df["HMA_10"] = ta.trend.WMAIndicator(df["mid_price_mean"], window=10).wma()
     df["KAMA_3_2_10"] = ta.momentum.KAMAIndicator(
         df["mid_price_mean"], window=3, pow1=2, pow2=10
     ).kama()
@@ -354,11 +342,9 @@ def add_technical_indicators(df):
 
 
 def add_time_features(combined_data):
-    # Ensure the index is a DatetimeIndex
     if not isinstance(combined_data.index, pd.DatetimeIndex):
         combined_data.index = pd.to_datetime(combined_data.index)
 
-    # Compute seconds since market open (9:30 AM)
     market_open_time = combined_data.index.normalize() + pd.Timedelta(
         hours=9, minutes=30
     )
@@ -382,52 +368,31 @@ def process_and_combine_data(
     data_folder="../AAPL_data",
     sampling_rate="1s",
 ):
-    """
-    Processes and combines order book data for a given date range.
 
-    Parameters:
-    - start_date (str or datetime): Start date for data processing.
-    - end_date (str or datetime): End date for data processing.
-    - data_folder (str): Path to the folder containing parquet files.
-    - sampling_rate (str): Resampling rate for computing order book features.
-
-    Returns:
-    - DataFrame: Combined and processed data with order book features and technical indicators.
-    """
-    # Convert dates to datetime format
     start_dt = pd.to_datetime(start_date)
     end_dt = pd.to_datetime(end_date)
 
     # Generate business days within the date range
     trading_days = pd.bdate_range(start=start_dt, end=end_dt)
 
-    # Construct file paths for each trading day
     file_paths = [
         f"{data_folder}/AAPL_{date.strftime('%Y-%m-%d')}_xnas-itch.parquet"
         for date in trading_days
     ]
 
-    # List to store processed data for each day
     daily_data_list = []
 
-    # Process each day's data
     for file_path in file_paths:
-        # Load raw data and filter by market hours
         raw_data = pd.read_parquet(file_path).between_time(market_open, market_close)
 
-        # Compute order book features
         order_book_data = compute_order_book_features(
             raw_data, sampling_rate, mid_price_variation_class_threshold
         )
 
-        # Add technical indicators
         enriched_data = add_technical_indicators(order_book_data)
 
-        # Store processed data
         daily_data_list.append(enriched_data)
 
-    # Concatenate all processed daily data
     combined_data = pd.concat(daily_data_list)
 
-    # Add time-based features and return final dataset
     return add_time_features(combined_data)
