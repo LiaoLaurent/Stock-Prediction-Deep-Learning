@@ -56,3 +56,25 @@ The `finance_utils.py` script provides functions for:
 2.  Obtain the limit order book data and place it in the specified directory.
 3.  Generate the `.parquet` data file using the `process_and_combine_data` of `data_preprocessing.py`.
 4.  Open the `main.ipynb` to train the models using the preprocessed data.
+
+# DeepLOB Model Training and Evaluation (`deeplob.ipynb`)
+
+This file (`deeplob.ipynb`) defines a Deep Learning model (DeepLOB), trains the model, and evaluates its performance for predicting short-term price movements.
+
+## Description
+
+### 1. DeepLOB Model Definition
+
+- **Defines the DeepLOB architecture:** The model implemented in this code is based on the paper:
+
+DeepLOB: Deep Convolutional Neural Networks for Limit Order Books
+Zihao Zhang, Stefan Zohren, and Stephen Roberts
+
+### 2. Model Training and Evaluation
+
+- **Implements the training loop:**
+  - Calculating loss (CrossEntropyLoss).
+  - Performing backpropagation and optimization using an optimizer (Adam or SGD).
+- **Hyperparameter optimization:** The script uses Optuna to optimize the model's hyperparameters (e.g., learning rate, number of layers, etc.) to improve performance.
+- **Evaluation:** Generating a classification report (precision, recall, F1-score) and creating a confusion matrix.
+- **Backtesting:** The script includes a basic backtesting procedure to simulate a trading strategy based on the model's predictions.

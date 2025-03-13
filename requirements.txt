@@ -1,0 +1,7 @@
+pandas
+ta
+numpy
+matplotlib
+torch
+tensorflow
+keras
